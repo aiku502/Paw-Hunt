@@ -19,6 +19,9 @@
         .ui-overlay { position: relative; z-index: 10; pointer-events: none; height: 100%; display: flex; flex-direction: column; padding: 1.5rem; }
         .glass { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(8px); border-radius: 2rem; }
         .camera-btn { background: linear-gradient(135deg, #60a5fa, #818cf8); pointer-events: auto; }
+        #loading-spinner { display: none; }
+        .is-loading #loading-spinner { display: block; }
+        .is-loading #btn-icon { display: none; }
     </style>
 </head>
 <body>
@@ -54,10 +57,11 @@
 
         <!-- Capture Button -->
         <div class="flex justify-center mb-4">
-            <button onclick="captureAndVerify()" class="camera-btn w-20 h-20 rounded-full flex items-center justify-center shadow-2xl active:scale-90 transition-transform">
-                <div class="w-16 h-16 border-4 border-white/30 rounded-full flex items-center justify-center">
+            <button id="capture-btn" onclick="captureAndVerify()" class="camera-btn w-20 h-20 rounded-full flex items-center justify-center shadow-2xl active:scale-90 transition-transform">
+                <div id="btn-icon" class="w-16 h-16 border-4 border-white/30 rounded-full flex items-center justify-center">
                     <div class="w-6 h-6 bg-white rounded-full"></div>
                 </div>
+                <div id="loading-spinner" class="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
             </button>
         </div>
     </div>
@@ -72,11 +76,13 @@
     <canvas id="capture-canvas" class="hidden"></canvas>
 
     <script>
-        const apiKey = "";
+        // API Key integrated for GitHub deployment
+        const apiKey = "AIzaSyDqNxEulNMBJ36TP49uZhqtHHJfjd9Ik2w"; 
         const video = document.getElementById('camera-stream');
         const canvas = document.getElementById('capture-canvas');
         const speechBubble = document.getElementById('speech-bubble');
         const catWrapper = document.getElementById('cat-wrapper');
+        const captureBtn = document.getElementById('capture-btn');
         
         let items = ["Mug", "Book", "Spoon", "Pillow", "Remote", "Shoe", "Fruit", "Plant", "Key", "Pen"];
         let availableItems = [...items];
@@ -89,7 +95,8 @@
             if (!text) return;
             window.speechSynthesis.cancel();
             const utterance = new SpeechSynthesisUtterance(text);
-            utterance.pitch = 2.0;
+            utterance.pitch = 1.8;
+            utterance.rate = 1.0;
             utterance.onstart = () => { 
                 catWrapper.classList.add('speaking'); 
                 speechBubble.innerText = text; 
@@ -104,27 +111,24 @@
 
         async function startGame() {
             const btn = document.getElementById('start-btn');
-            btn.innerText = "Starting...";
-            
+            btn.innerText = "Connecting...";
             try {
-                // Request back camera directly with no additional constraints
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: "environment" } 
                 });
                 video.srcObject = stream;
                 document.getElementById('start-overlay').style.display = 'none';
-                speak("Game started! Let's go.");
+                speak("Ready when you are!");
                 nextRound();
             } catch (err) {
-                console.error("Camera failed:", err);
-                alert("Please check camera permissions.");
+                alert("Camera access is required to play. Please check your browser settings.");
                 btn.innerText = "START GAME";
             }
         }
 
         function nextRound() {
             if (availableItems.length === 0) {
-                speak("You found everything! You win!");
+                speak("You found them all! You're amazing!");
                 return;
             }
             const idx = Math.floor(Math.random() * availableItems.length);
@@ -132,7 +136,7 @@
             availableItems.splice(idx, 1);
             document.getElementById('target-item').innerText = currentItem;
             document.getElementById('score-display').innerText = `${score}/${items.length}`;
-            speak(`Find a ${currentItem}!`);
+            speak(`Can you find a ${currentItem}?`);
             
             timeLeft = 45;
             if (timerId) clearInterval(timerId);
@@ -141,7 +145,7 @@
                 document.getElementById('timer-display').innerText = `${timeLeft}s`;
                 if (timeLeft <= 0) {
                     clearInterval(timerId);
-                    speak("Time's up! Try again?");
+                    speak("Time ran out! Want to try again?");
                 }
             }, 1000);
         }
@@ -149,27 +153,29 @@
         async function captureAndVerify() {
             if (isProcessing) return;
             isProcessing = true;
+            captureBtn.classList.add('is-loading');
             
             document.getElementById('shutter-flash').classList.add('flash-active');
             setTimeout(() => document.getElementById('shutter-flash').classList.remove('flash-active'), 300);
 
             const target = document.getElementById('target-item').innerText;
-            speak("Let's see...");
+            speak("Let me check that...");
 
             canvas.width = video.videoWidth || 640;
             canvas.height = video.videoHeight || 480;
             canvas.getContext('2d').drawImage(video, 0, 0);
-            const base64 = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+            const base64 = canvas.toDataURL('image/jpeg', 0.5).split(',')[1];
 
             try {
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+                
                 const response = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         contents: [{ 
                             parts: [
-                                { text: `Is there a "${target}" in this image? Answer ONLY in JSON: {"found": boolean, "msg": "a very short polite cat comment under 8 words"}.` },
+                                { text: `Look at this photo. Is a "${target}" clearly visible? Answer ONLY with JSON: {"found": boolean, "msg": "a short friendly cat comment under 8 words"}.` },
                                 { inlineData: { mimeType: "image/jpeg", data: base64 } }
                             ] 
                         }],
@@ -178,20 +184,27 @@
                 });
 
                 const data = await response.json();
-                const resultText = data.candidates[0].content.parts[0].text;
-                const result = JSON.parse(resultText);
+                if (data.candidates && data.candidates[0].content) {
+                    let resultText = data.candidates[0].content.parts[0].text;
+                    resultText = resultText.replace(/```json/g, '').replace(/```/g, '').trim();
+                    const result = JSON.parse(resultText);
 
-                if (result.found) {
-                    score++;
-                    speak(result.msg || "Found it! Great.");
-                    nextRound();
+                    if (result.found) {
+                        score++;
+                        speak(result.msg || "You found it! Nice job.");
+                        nextRound();
+                    } else {
+                        speak(result.msg || "I don't see it. Try another angle?");
+                    }
                 } else {
-                    speak(result.msg || "Not quite, try again!");
+                    throw new Error("Invalid response");
                 }
             } catch (e) {
-                speak("I missed that. Try again.");
+                console.error(e);
+                speak("I missed that. Could you try taking the photo again?");
             } finally {
                 isProcessing = false;
+                captureBtn.classList.remove('is-loading');
             }
         }
     </script>
