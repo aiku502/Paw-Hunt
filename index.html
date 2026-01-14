@@ -31,13 +31,11 @@
     </div>
 
     <div class="ui-overlay">
-        <!-- Cat UI -->
         <div class="flex flex-col items-center">
             <div id="cat-wrapper"><div id="cat-face"></div></div>
             <div id="speech-bubble" class="mt-2 glass px-6 py-2 max-w-[280px] text-center font-bold text-slate-700 opacity-0 transition-opacity"></div>
         </div>
 
-        <!-- Stats -->
         <div class="flex justify-between mt-auto mb-4">
             <div class="glass p-3 min-w-[90px] text-center shadow-md">
                 <p class="text-[10px] font-bold text-blue-500 uppercase">Score</p>
@@ -49,13 +47,11 @@
             </div>
         </div>
 
-        <!-- Target Item -->
         <div class="glass p-5 text-center mb-4 pointer-events-auto shadow-xl">
             <p class="text-blue-500 font-bold text-xs mb-1 uppercase tracking-widest">Find this item:</p>
             <h2 id="target-item" class="text-3xl font-black text-slate-800">---</h2>
         </div>
 
-        <!-- Capture Button -->
         <div class="flex justify-center mb-4">
             <button id="capture-btn" onclick="captureAndVerify()" class="camera-btn w-20 h-20 rounded-full flex items-center justify-center shadow-2xl active:scale-90 transition-transform">
                 <div id="btn-icon" class="w-16 h-16 border-4 border-white/30 rounded-full flex items-center justify-center">
@@ -66,7 +62,6 @@
         </div>
     </div>
 
-    <!-- Home Screen -->
     <div id="start-overlay" class="fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center p-8 text-center">
         <h1 class="text-5xl font-black text-blue-600 mb-2">SnapPaws</h1>
         <p class="text-slate-500 font-bold mb-10">Show me items to win!</p>
@@ -76,7 +71,6 @@
     <canvas id="capture-canvas" class="hidden"></canvas>
 
     <script>
-        // API Key integrated for GitHub deployment
         const apiKey = "AIzaSyDqNxEulNMBJ36TP49uZhqtHHJfjd9Ik2w"; 
         const video = document.getElementById('camera-stream');
         const canvas = document.getElementById('capture-canvas');
@@ -96,7 +90,6 @@
             window.speechSynthesis.cancel();
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.pitch = 1.8;
-            utterance.rate = 1.0;
             utterance.onstart = () => { 
                 catWrapper.classList.add('speaking'); 
                 speechBubble.innerText = text; 
@@ -111,42 +104,31 @@
 
         async function startGame() {
             const btn = document.getElementById('start-btn');
-            btn.innerText = "Connecting...";
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: "environment" } 
-                });
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
                 video.srcObject = stream;
                 document.getElementById('start-overlay').style.display = 'none';
                 speak("Ready when you are!");
                 nextRound();
             } catch (err) {
-                alert("Camera access is required to play. Please check your browser settings.");
-                btn.innerText = "START GAME";
+                alert("Camera error. Please ensure permissions are granted.");
             }
         }
 
         function nextRound() {
-            if (availableItems.length === 0) {
-                speak("You found them all! You're amazing!");
-                return;
-            }
+            if (availableItems.length === 0) { speak("You win!"); return; }
             const idx = Math.floor(Math.random() * availableItems.length);
             const currentItem = availableItems[idx];
             availableItems.splice(idx, 1);
             document.getElementById('target-item').innerText = currentItem;
             document.getElementById('score-display').innerText = `${score}/${items.length}`;
-            speak(`Can you find a ${currentItem}?`);
-            
+            speak(`Find a ${currentItem}!`);
             timeLeft = 45;
             if (timerId) clearInterval(timerId);
             timerId = setInterval(() => {
                 timeLeft--;
                 document.getElementById('timer-display').innerText = `${timeLeft}s`;
-                if (timeLeft <= 0) {
-                    clearInterval(timerId);
-                    speak("Time ran out! Want to try again?");
-                }
+                if (timeLeft <= 0) { clearInterval(timerId); speak("Time's up!"); }
             }, 1000);
         }
 
@@ -159,15 +141,18 @@
             setTimeout(() => document.getElementById('shutter-flash').classList.remove('flash-active'), 300);
 
             const target = document.getElementById('target-item').innerText;
-            speak("Let me check that...");
+            speak("Checking...");
 
             canvas.width = video.videoWidth || 640;
             canvas.height = video.videoHeight || 480;
-            canvas.getContext('2d').drawImage(video, 0, 0);
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+            
             const base64 = canvas.toDataURL('image/jpeg', 0.5).split(',')[1];
 
             try {
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+                // Use the standard stable endpoint
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
                 
                 const response = await fetch(url, {
                     method: 'POST',
@@ -175,33 +160,34 @@
                     body: JSON.stringify({
                         contents: [{ 
                             parts: [
-                                { text: `Look at this photo. Is a "${target}" clearly visible? Answer ONLY with JSON: {"found": boolean, "msg": "a short friendly cat comment under 8 words"}.` },
+                                { text: `Is there a "${target}" in this image? Return JSON: {"found": boolean, "msg": "short cat comment"}` },
                                 { inlineData: { mimeType: "image/jpeg", data: base64 } }
                             ] 
-                        }],
-                        generationConfig: { responseMimeType: "application/json" }
+                        }]
                     })
                 });
 
                 const data = await response.json();
-                if (data.candidates && data.candidates[0].content) {
-                    let resultText = data.candidates[0].content.parts[0].text;
-                    resultText = resultText.replace(/```json/g, '').replace(/```/g, '').trim();
-                    const result = JSON.parse(resultText);
+                
+                if (data.error) {
+                    console.error("API Error Details:", data.error);
+                    throw new Error(data.error.message);
+                }
 
-                    if (result.found) {
-                        score++;
-                        speak(result.msg || "You found it! Nice job.");
-                        nextRound();
-                    } else {
-                        speak(result.msg || "I don't see it. Try another angle?");
-                    }
+                const rawText = data.candidates[0].content.parts[0].text;
+                const cleanJson = rawText.substring(rawText.indexOf('{'), rawText.lastIndexOf('}') + 1);
+                const result = JSON.parse(cleanJson);
+
+                if (result.found) {
+                    score++;
+                    speak(result.msg || "Found it!");
+                    nextRound();
                 } else {
-                    throw new Error("Invalid response");
+                    speak(result.msg || "Not quite, try again!");
                 }
             } catch (e) {
-                console.error(e);
-                speak("I missed that. Could you try taking the photo again?");
+                console.error("Full Error:", e);
+                speak("I'm having trouble connecting. Is the API Key valid?");
             } finally {
                 isProcessing = false;
                 captureBtn.classList.remove('is-loading');
